@@ -51,9 +51,7 @@ export const DashboardLayout: React.FC<LayoutProps> = ({
         <div className={`p-6 flex items-center ${isCollapsed ? 'justify-center' : 'space-x-3'} border-b border-slate-800 transition-all duration-300 h-[89px]`}>
           {!isCollapsed ? (
              <div className="flex items-center gap-3 animate-in fade-in duration-200">
-               <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center p-1">
-                 <Wifi className="w-6 h-6 text-pink-600" />
-               </div>
+
                <span className="text-xl font-bold text-white tracking-wide whitespace-nowrap overflow-hidden">
                 Umoja Portal
               </span>

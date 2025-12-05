@@ -1,18 +1,21 @@
 
 import React, { useState, useEffect } from 'react';
 import { Lead, AdminUser, LeadComment, Template } from '../types';
-import { supabase } from '../services/supabaseClient';
+import { GoogleSheetsService } from '../services/googleSheetsService';
+import { SupabaseService } from '../services/supabaseService';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 import { toast } from 'react-hot-toast';
-import { X, UserPlus, Mail, Phone, MapPin, Tag, Calendar, MessageSquare, Send, Clock, User, FileText } from 'lucide-react';
+import { X, UserPlus, Mail, Phone, MapPin, Tag, Calendar, MessageSquare, Send, Clock, User, FileText, ExternalLink } from 'lucide-react';
 
 interface LeadModalProps {
   isOpen: boolean;
   onClose: () => void;
   lead: Lead | null;
   currentUser: AdminUser | null;
+  readOnly?: boolean;
 }
 
-export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, currentUser }) => {
+export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, currentUser, readOnly }) => {
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [comments, setComments] = useState<LeadComment[]>([]);
@@ -35,18 +38,24 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
   const fetchComments = async () => {
     if (!lead) return;
     setIsLoadingComments(true);
-    try {
-      const { data, error } = await supabase
-        .from('Comments')
-        .select('*')
-        .eq('lead_id', lead.id)
-        .order('date', { ascending: false });
 
-      if (error) throw error;
-      setComments(data || []);
+    try {
+       // Use Supabase for comments if configured
+       if (isSupabaseConfigured) {
+          const leadComments = await SupabaseService.getLeadComments(lead.id);
+          setComments(leadComments);
+       } else {
+          // Fallback to Google Sheets (legacy) if Supabase not available, 
+          // though prompt requested Supabase.
+          const allComments = await GoogleSheetsService.fetchSheet<LeadComment>('Comments');
+          const leadComments = allComments
+            .filter(c => Number(c.lead_id) === Number(lead.id))
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setComments(leadComments);
+       }
     } catch (error) {
-      console.error('Error fetching comments:', error);
-      toast.error('Could not load comment history');
+       console.error('Error fetching comments:', error);
+       toast.error('Could not load comment history');
     } finally {
       setIsLoadingComments(false);
     }
@@ -54,12 +63,8 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
 
   const fetchTemplates = async () => {
     try {
-      const { data, error } = await supabase
-        .from('Templates')
-        .select('id, Template');
-      
-      if (error) throw error;
-      setTemplates(data || []);
+      const allTemplates = await GoogleSheetsService.fetchSheet<Template>('Templates');
+      setTemplates(allTemplates);
     } catch (error) {
       console.error('Error fetching templates:', error);
     }
@@ -73,8 +78,6 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
       setComment(template.Template);
       setSelectedTemplateId(template.id);
     } else {
-      // Don't necessarily clear comment if they deselect, but clear the ID
-      // Or we could clear it. Let's keep it simple: deselecting doesn't clear text automatically unless empty
       setSelectedTemplateId(null);
       if (e.target.value === "") {
         setComment('');
@@ -96,24 +99,28 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
     setIsSubmitting(true);
 
     try {
-      const payload: any = {
-        admin_id: currentUser.admin_id || currentUser.id,
-        admin_Name: currentUser.name,
-        lead_id: lead?.id,
-        lead_name: lead?.name,
-        comment: comment,
-        date: new Date().toISOString()
-      };
+      const adminId = currentUser.admin_id || currentUser.id;
+      const dateStr = new Date().toISOString();
 
-      if (selectedTemplateId) {
-        payload.template_id = selectedTemplateId;
+      if (isSupabaseConfigured) {
+          await SupabaseService.addLeadComment({
+            lead_id: lead!.id,
+            lead_name: lead!.name,
+            admin_id: adminId,
+            admin_Name: currentUser.name,
+            comment: comment,
+            date: dateStr
+          });
+      } else {
+          // Legacy fallback
+          await GoogleSheetsService.addComment(
+            lead!.id,
+            adminId,
+            currentUser.name,
+            comment,
+            selectedTemplateId || undefined
+          );
       }
-
-      const { error } = await supabase
-        .from('Comments')
-        .insert([payload]);
-
-      if (error) throw error;
 
       toast.success('Comment added successfully');
       setComment('');
@@ -121,7 +128,7 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
       fetchComments(); // Refresh list
     } catch (error: any) {
       console.error('Error adding comment:', error);
-      toast.error('Failed to add comment: ' + (error.message || 'Unknown error'));
+      toast.error('Failed to add comment');
     } finally {
       setIsSubmitting(false);
     }
@@ -129,6 +136,7 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
     return new Intl.DateTimeFormat('en-US', {
       month: 'short',
       day: 'numeric',
@@ -152,15 +160,26 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
               <UserPlus className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{lead.name}</h2>
+              <h2 className="text-xl font-bold text-gray-900">
+                <a 
+                  href={`https://portal.umoja.network/admin/crm/leads/view?id=${lead.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-amber-600 hover:underline flex items-center gap-2 transition-colors"
+                  title="Open in Splynx Portal"
+                >
+                  {lead.name}
+                  <ExternalLink className="w-5 h-5 text-gray-400" />
+                </a>
+              </h2>
               <div className="flex items-center gap-2 text-sm text-gray-500">
                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
-                  lead.status === 'new' ? 'bg-pink-100 text-pink-700 border-pink-200' :
-                  lead.status === 'pending' ? 'bg-amber-100 text-amber-700 border-amber-200' :
-                  lead.status === 'converted' ? 'bg-green-100 text-green-700 border-green-200' :
+                  lead.status.toLowerCase() === 'new' ? 'bg-pink-100 text-pink-700 border-pink-200' :
+                  lead.status.toLowerCase() === 'in progress' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                  lead.status.toLowerCase() === 'won' ? 'bg-green-100 text-green-700 border-green-200' :
                   'bg-gray-100 text-gray-600 border-gray-200'
                 }`}>
-                  {lead.status.toUpperCase()}
+                  {lead.status.charAt(0).toUpperCase() + lead.status.slice(1)}
                 </span>
                 <span>ID: {lead.id}</span>
               </div>
@@ -197,7 +216,7 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
               <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Address</p>
-                <p className="text-gray-900">{lead.address}</p>
+                <p className="text-gray-900">{lead.street_1 || lead.address || 'N/A'}</p>
               </div>
             </div>
 
@@ -212,9 +231,9 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
               <div className="flex items-start gap-4 p-3 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition-colors">
                 <Calendar className="w-5 h-5 text-gray-400 mt-0.5" />
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Created</p>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Date Added</p>
                   <p className="text-gray-900">
-                    {lead.created_at ? new Date(lead.created_at).toLocaleDateString() : 'N/A'}
+                    {lead.date_add ? new Date(lead.date_add).toLocaleDateString() : (lead.created_at ? new Date(lead.created_at).toLocaleDateString() : 'N/A')}
                   </p>
                 </div>
               </div>
@@ -262,7 +281,8 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
           </div>
         </div>
 
-        {/* Fixed Input Section */}
+        {/* Fixed Input Section - Hidden if readOnly */}
+        {!readOnly && (
         <div className="p-4 bg-white border-t border-gray-100 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
              {/* Template Selector */}
              <div className="mb-2 flex items-center gap-2 animate-in fade-in">
@@ -313,6 +333,7 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
                 </button>
             </div>
         </div>
+        )}
 
         {/* Footer */}
         <div className="bg-gray-50 p-4 border-t border-gray-200 flex justify-end flex-shrink-0">

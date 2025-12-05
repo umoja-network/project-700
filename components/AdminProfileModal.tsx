@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Hash, AtSign, Edit2, Save, Loader2, Lock } from 'lucide-react';
-import { supabase } from '../services/supabaseClient';
+import { SupabaseService } from '../services/supabaseService';
 import { toast } from 'react-hot-toast';
 
 interface AdminProfileModalProps {
@@ -14,9 +14,10 @@ interface AdminProfileModalProps {
     username: string;
   };
   onAdminUpdate?: (updatedData: { username: string }) => void;
+  readOnly?: boolean;
 }
 
-export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({ isOpen, onClose, admin, onAdminUpdate }) => {
+export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({ isOpen, onClose, admin, onAdminUpdate, readOnly }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -44,15 +45,11 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({ isOpen, on
 
       // Only update password if user typed something
       if (newPassword.trim()) {
-        updates.Password = newPassword;
+        updates.password = newPassword;
       }
-
-      const { error } = await supabase
-        .from('Admin')
-        .update(updates)
-        .eq('id', admin.id);
-
-      if (error) throw error;
+      
+      // Update via Supabase Service
+      await SupabaseService.updateAdmin(admin.admin_id, updates);
 
       toast.success('Profile updated successfully');
       
@@ -89,7 +86,9 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({ isOpen, on
                  {admin.name.charAt(0).toUpperCase()}
               </div>
               <h3 className="text-lg font-bold text-gray-900">{admin.name}</h3>
-              <span className="text-sm text-pink-600 font-medium bg-pink-50 px-3 py-1 rounded-full mt-1">Super Administrator</span>
+              <span className="text-sm text-pink-600 font-medium bg-pink-50 px-3 py-1 rounded-full mt-1">
+                {readOnly ? 'View Only Access' : 'Super Administrator'}
+              </span>
            </div>
 
            {isEditing ? (
@@ -160,6 +159,7 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({ isOpen, on
               </>
             ) : (
               <>
+                {!readOnly && (
                 <button 
                   onClick={() => setIsEditing(true)} 
                   className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2"
@@ -167,6 +167,7 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({ isOpen, on
                   <Edit2 className="w-4 h-4" />
                   Edit
                 </button>
+                )}
                 <button 
                   onClick={onClose} 
                   className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"

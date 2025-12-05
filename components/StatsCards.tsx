@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { DashboardStats } from '../types';
-import { Users, UserPlus, TrendingUp, Activity } from 'lucide-react';
+import { Users, UserPlus, TrendingUp, Activity, Wrench, UserX } from 'lucide-react';
 
 interface StatsCardsProps {
   stats: DashboardStats;
@@ -31,12 +31,32 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, onCardClick }) =>
       clickable: true
     },
     {
-      id: 'pending_leads',
-      title: 'Pending Leads',
-      value: stats.pendingLeads,
+      id: 'pending_installations',
+      title: 'Pending Installations',
+      value: stats.pendingInstallations,
+      icon: Wrench,
+      color: 'bg-indigo-500',
+      trend: 'Active customers w/o devices',
+      trendUp: false,
+      clickable: true
+    },
+    {
+      id: 'new_leads',
+      title: 'New Leads',
+      value: stats.newLeads,
       icon: UserPlus,
       color: 'bg-amber-500',
-      trend: '-2% processed',
+      trend: 'Fresh enquiries',
+      trendUp: true,
+      clickable: true
+    },
+    {
+      id: 'lost_leads',
+      title: 'Lost Leads',
+      value: stats.lostLeads,
+      icon: UserX,
+      color: 'bg-gray-500',
+      trend: 'Opportunities lost',
       trendUp: false,
       clickable: true
     },
@@ -53,7 +73,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, onCardClick }) =>
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
       {cards.map((card) => {
         const Icon = card.icon;
         return (
@@ -74,7 +94,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, onCardClick }) =>
               </div>
             </div>
             <div className="mt-4 flex items-center text-sm">
-              <span className={`font-medium ${card.trendUp ? 'text-green-600' : 'text-red-500'}`}>
+              <span className={`font-medium ${card.trendUp ? 'text-green-600' : 'text-gray-500'}`}>
                 {card.trend}
               </span>
             </div>

@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { Customer, InventoryItem, CustomerNote, AdminUser } from '../types';
 import { SplynxService } from '../services/splynxService';
-import { supabase } from '../services/supabaseClient';
+import { GoogleSheetsService } from '../services/googleSheetsService';
 import { toast } from 'react-hot-toast';
-import { X, Smartphone, User, MapPin, CreditCard, Mail, Phone, Hash, StickyNote, Send } from 'lucide-react';
+import { X, Smartphone, User, MapPin, CreditCard, Mail, Phone, Hash, StickyNote, Send, Calendar, ExternalLink } from 'lucide-react';
 
 interface CustomerModalProps {
   isOpen: boolean;
@@ -12,9 +12,10 @@ interface CustomerModalProps {
   customer: Customer | null;
   devices: InventoryItem[];
   currentUser: AdminUser | null;
+  readOnly?: boolean;
 }
 
-export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, customer, devices, currentUser }) => {
+export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, customer, devices, currentUser, readOnly }) => {
   const [notes, setNotes] = useState<CustomerNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [comment, setComment] = useState('');
@@ -35,8 +36,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, c
       const response = await SplynxService.getCustomerNotes(customerId);
       let notesData = response.data;
       
-      // If we have real data (or mock data with IDs we want to resolve), resolve Admin Names via Supabase
-      // We only resolve if admin_name is missing, which might happen if the API doesn't return the name field
+      // If we have real data (or mock data with IDs we want to resolve), resolve Admin Names
       if (!response.isMock || notesData.some(n => !n.admin_name)) {
         // Extract unique admin IDs from the notes that need resolution
         const adminIdsToResolve = Array.from(new Set(
@@ -48,27 +48,23 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, c
 
         if (adminIdsToResolve.length > 0) {
           try {
-            const { data: admins, error } = await supabase
-              .from('Admin')
-              .select('admin_id, name')
-              .in('admin_id', adminIdsToResolve);
-              
-            if (!error && admins) {
-              // Create a lookup map: admin_id -> name
-              // Ensure we match types (string vs number) by converting both to string
-              const adminMap = new Map<string, string>();
-              admins.forEach(admin => {
-                if (admin.admin_id) adminMap.set(String(admin.admin_id), admin.name);
-              });
+            const allAdmins = await GoogleSheetsService.fetchSheet<AdminUser>('Admin');
+            const adminMap = new Map<string, string>();
+            
+            allAdmins.forEach(admin => {
+               // Check if this admin is in our resolve list
+               if (admin.admin_id && adminIdsToResolve.includes(admin.admin_id)) {
+                  adminMap.set(String(admin.admin_id), admin.name);
+               }
+            });
 
-              // Merge names into notes
-              notesData = notesData.map(note => ({
-                ...note,
-                admin_name: note.admin_name || adminMap.get(String(note.admin_id)) || `Admin #${note.admin_id}`
-              }));
-            }
-          } catch (err) {
-            console.error("Error resolving admin names from Supabase", err);
+            // Merge names into notes
+            notesData = notesData.map(note => ({
+              ...note,
+              admin_name: note.admin_name || adminMap.get(String(note.admin_id)) || `Admin #${note.admin_id}`
+            }));
+          } catch (sheetErr) {
+            console.error("Failed to resolve admins from backup", sheetErr);
           }
         }
       }
@@ -176,7 +172,18 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, c
               <User className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{customer.name}</h2>
+              <h2 className="text-xl font-bold text-gray-900">
+                <a 
+                  href={`https://portal.umoja.network/admin/customers/view?id=${customer.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-pink-600 hover:underline flex items-center gap-2 transition-colors"
+                  title="Open in Splynx Portal"
+                >
+                  {customer.name}
+                  <ExternalLink className="w-5 h-5 text-gray-400" />
+                </a>
+              </h2>
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
                   customer.status === 'active' ? 'bg-green-100 text-green-700 border-green-200' : 
@@ -245,6 +252,15 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, c
                     </span>
                   </p>
                   <p className="text-xs text-gray-500 mt-1">Tariff ID: {customer.tariff_id}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Calendar className="w-5 h-5 text-gray-400 mt-0.5" />
+                <div>
+                  <p className="text-xs text-gray-500">Date Added</p>
+                  <p className="text-gray-900 font-medium">
+                    {customer.date_add ? new Date(customer.date_add).toLocaleDateString() : (customer.created_at ? new Date(customer.created_at).toLocaleDateString() : 'N/A')}
+                  </p>
                 </div>
               </div>
             </div>
@@ -333,7 +349,8 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, c
           </section>
         </div>
 
-        {/* Fixed Input Section */}
+        {/* Fixed Input Section - Hidden if readOnly */}
+        {!readOnly && (
         <div className="p-4 bg-white border-t border-gray-100 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
              <div className="flex gap-2">
                 <input 
@@ -362,6 +379,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, c
                 </button>
             </div>
         </div>
+        )}
         
         {/* Footer */}
         <div className="bg-gray-50 p-4 border-t border-gray-200 flex justify-end flex-shrink-0">

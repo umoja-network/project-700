@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Users, UserPlus, LogOut, ChevronLeft, ChevronRight, Wifi } from 'lucide-react';
+import { LayoutDashboard, Users, UserPlus, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -51,14 +51,19 @@ export const DashboardLayout: React.FC<LayoutProps> = ({
         <div className={`p-6 flex items-center ${isCollapsed ? 'justify-center' : 'space-x-3'} border-b border-slate-800 transition-all duration-300 h-[89px]`}>
           {!isCollapsed ? (
              <div className="flex items-center gap-3 animate-in fade-in duration-200">
-
-               <span className="text-xl font-bold text-white tracking-wide whitespace-nowrap overflow-hidden">
-                Umoja Portal
-              </span>
+              <img 
+                src="https://thabisot33.github.io/logo/Umoja%20Logo%20Web_320x86_png.png" 
+                alt="Umoja Portal" 
+                className="h-12 w-auto object-contain"
+              />
              </div>
           ) : (
-            <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center p-1">
-               <Wifi className="w-6 h-6 text-pink-600" />
+            <div className="flex items-center justify-center">
+               <img 
+                  src="https://thabisot33.github.io/logo/Umoja%20Logo%20Web_320x86_png.png" 
+                  alt="Umoja Portal" 
+                  className="w-12 h-auto object-contain"
+               />
             </div>
           )}
         </div>

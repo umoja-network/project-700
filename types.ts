@@ -4,10 +4,12 @@ export interface Lead {
   name: string;
   email: string;
   phone: string;
-  address: string;
+  address?: string;
+  street_1?: string;
   type: string;
-  status: 'new' | 'pending' | 'converted' | 'lost';
+  status: 'New' | 'In Progress' | 'Won' | 'Lost' | string;
   created_at?: string;
+  date_add?: string;
   added_by?: string;
   added_by_id?: number;
   partner_id?: number;
@@ -24,7 +26,9 @@ export interface Customer {
   balance?: number;
   street_1?: string;
   city?: string;
+  gps?: string;
   created_at?: string;
+  date_add?: string;
   added_by?: string;
   added_by_id?: number;
   partner_id?: number;
@@ -60,7 +64,9 @@ export interface DashboardStats {
   totalCustomers: number;
   activeCustomers: number;
   totalLeads: number;
-  pendingLeads: number;
+  newLeads: number;
+  lostLeads: number;
+  pendingInstallations: number;
   conversionRate: string;
 }
 
@@ -75,7 +81,9 @@ export interface AdminUser {
   name: string;
   username: string;
   Password?: string;
+  password?: string;
   created_at?: string;
+  role?: 'admin' | 'viewer';
 }
 
 export interface LeadComment {

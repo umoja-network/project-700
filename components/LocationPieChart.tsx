@@ -2,18 +2,16 @@
 import React from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-interface TemplatePieChartProps {
-  data: { name: string; value: number; templateKey?: string }[];
-  onSliceClick?: (data: any) => void;
+interface LocationPieChartProps {
+  data: { name: string; value: number; color: string }[];
+  onSliceClick?: (locationName: string) => void;
 }
 
-const COLORS = ['#db2777', '#9333ea', '#2563eb', '#0d9488', '#d97706', '#dc2626', '#4b5563'];
-
-export const TemplatePieChart: React.FC<TemplatePieChartProps> = ({ data, onSliceClick }) => {
+export const LocationPieChart: React.FC<LocationPieChartProps> = ({ data, onSliceClick }) => {
   if (!data || data.length === 0 || data.every(d => d.value === 0)) {
     return (
       <div className="flex h-64 items-center justify-center text-gray-400">
-        No template data available.
+        No location data available.
       </div>
     );
   }
@@ -31,19 +29,14 @@ export const TemplatePieChart: React.FC<TemplatePieChartProps> = ({ data, onSlic
             paddingAngle={2}
             dataKey="value"
             onClick={(data) => {
-              if (onSliceClick && data && data.payload) {
-                onSliceClick(data.payload);
+              if (data?.payload?.name && onSliceClick) {
+                onSliceClick(data.payload.name);
               }
             }}
             cursor={onSliceClick ? "pointer" : "default"}
           >
             {data.map((entry, index) => (
-              <Cell 
-                key={`cell-${index}`} 
-                fill={COLORS[index % COLORS.length]} 
-                strokeWidth={0} 
-                style={{ cursor: onSliceClick ? 'pointer' : 'default', outline: 'none' }}
-              />
+              <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
             ))}
           </Pie>
           <Tooltip 

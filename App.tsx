@@ -1,24 +1,50 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { SplynxService } from './services/splynxService';
-import { supabase } from './services/supabaseClient';
-import { Customer, Lead, DashboardStats, InventoryItem, AdminUser } from './types';
+import { GoogleSheetsService } from './services/googleSheetsService';
+import { SupabaseService } from './services/supabaseService';
+import { isSupabaseConfigured } from './services/supabaseClient';
+import { Customer, Lead, DashboardStats, InventoryItem, AdminUser, LeadComment } from './types';
 import { DashboardLayout } from './components/DashboardLayout';
 import { StatsCards } from './components/StatsCards';
 import { DataTable } from './components/DataTable';
 import { ActivityChart } from './components/ActivityChart';
 import { StatusPieChart } from './components/StatusPieChart';
 import { TemplatePieChart } from './components/TemplatePieChart';
+import { LocationPieChart } from './components/LocationPieChart';
 import { CustomerModal } from './components/CustomerModal';
 import { LeadModal } from './components/LeadModal';
 import { CustomerListModal } from './components/CustomerListModal';
+import { LeadListModal } from './components/LeadListModal';
 import { AdminProfileModal } from './components/AdminProfileModal';
 import { LoginPage } from './components/LoginPage';
 import { Toaster, toast } from 'react-hot-toast';
 import { 
   Search, 
   RefreshCw,
+  CheckCheck,
 } from 'lucide-react';
+
+// Helper to determine location based on GPS
+const getCustomerLocation = (c: Customer): string => {
+  if (c.gps) {
+    const parts = c.gps.split(',').map(p => parseFloat(p.trim()));
+    if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      const lat = parts[0];
+      const lon = parts[1];
+
+      // Rough Geofencing based on Latitude
+      // Limpopo: Lat roughly -22.0 to -25.3
+      if (lat >= -25.3 && lat <= -22.0) {
+        return 'Limpopo';
+      } 
+      // Gauteng: Lat roughly -25.3 to -28.0, Lon 27.0 to 29.5
+      else if (lat < -25.3 && lat >= -28.0 && lon >= 27.0 && lon <= 29.5) {
+        return 'Gauteng';
+      }
+    }
+  } 
+  return 'Other';
+};
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -52,8 +78,15 @@ const App: React.FC = () => {
     customers: Customer[];
   }>({ isOpen: false, title: '', customers: [] });
 
+  const [leadListModal, setLeadListModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    leads: Lead[];
+  }>({ isOpen: false, title: '', leads: [] });
+
   // Template Chart Stats
-  const [leadTemplateStats, setLeadTemplateStats] = useState<{name: string, value: number}[]>([]);
+  const [leadTemplateStats, setLeadTemplateStats] = useState<{name: string, value: number, templateKey: string}[]>([]);
+  const [allComments, setAllComments] = useState<LeadComment[]>([]);
 
   const fetchData = async (isAutoReload = false) => {
     if (!isAutoReload) setLoading(true);
@@ -83,36 +116,70 @@ const App: React.FC = () => {
       setIsMockData(leadsData.isMock || customersData.isMock || inventoryData.isMock);
       setLastRefreshed(new Date());
 
-      // Fetch comments for Lead Template Pie Chart
-      const { data: commentsData, error: commentsError } = await supabase
-        .from('Comments')
-        .select('template_id, comment');
-      
-      if (!commentsError && commentsData) {
-        const statsMap = new Map<string, { count: number, label: string }>();
+      // Fetch Read Statuses from Supabase
+      try {
+        if (isSupabaseConfigured) {
+          const [readCustIds, readLdIds] = await Promise.all([
+            SupabaseService.getReadStatus('Customers'),
+            SupabaseService.getReadStatus('Leads')
+          ]);
+          setViewedCustomerIds(readCustIds);
+          setViewedLeadIds(readLdIds);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch read status from Supabase', err);
+      }
+
+      // Pre-calculate valid lead IDs for Project 700 (partner_id = 4)
+      const validProject700LeadIds = new Set(
+        leadsData.data
+          .filter((l: any) => l.partner_id === 4)
+          .map((l: any) => l.id)
+      );
+
+      // Fetch comments for Lead Template Pie Chart (Google Sheets)
+      try {
+        const commentsData = await GoogleSheetsService.fetchSheet<LeadComment>('Comments');
         
-        commentsData.forEach((c: any) => {
-          const isOther = !c.template_id;
-          const key = isOther ? 'other' : String(c.template_id);
-          // Use comment as label, default to 'Other' or 'Template #ID' if comment missing
-          let label = isOther ? 'Other' : (c.comment || `Template ${c.template_id}`);
+        if (commentsData) {
+          setAllComments(commentsData);
+          // Use a Map to track unique Lead IDs per template
+          const statsMap = new Map<string, { leadIds: Set<number>, label: string, key: string }>();
           
-          // Truncate label if too long for the chart
-          if (label.length > 20) label = label.substring(0, 20) + '...';
-  
-          if (!statsMap.has(key)) {
-            statsMap.set(key, { count: 0, label });
-          }
+          commentsData.forEach((c) => {
+            const leadId = Number(c.lead_id);
+            // Only count if lead belongs to Project 700 (partner_id === 4)
+            if (!validProject700LeadIds.has(leadId)) return;
+
+            const isOther = !c.template_id;
+            const key = isOther ? 'other' : String(c.template_id);
+            // Use comment as label, default to 'Other' or 'Template #ID' if comment missing
+            let label = isOther ? 'Other' : (c.comment || `Template ${c.template_id}`);
+            
+            // Truncate label if too long for the chart
+            if (label && label.length > 20) label = label.substring(0, 20) + '...';
+    
+            if (!statsMap.has(key)) {
+              statsMap.set(key, { leadIds: new Set<number>(), label: label || 'Unknown', key });
+            }
+            
+            const entry = statsMap.get(key)!;
+            entry.leadIds.add(leadId);
+          });
           
-          const entry = statsMap.get(key)!;
-          entry.count++;
-        });
-        
-        const chartData = Array.from(statsMap.values())
-          .map(v => ({ name: v.label, value: v.count }))
-          .sort((a, b) => b.value - a.value);
-          
-        setLeadTemplateStats(chartData);
+          const chartData = Array.from(statsMap.values())
+            .map(v => ({ 
+                name: v.label, 
+                value: v.leadIds.size, // Count unique leads
+                templateKey: v.key 
+            }))
+            .filter(item => item.value > 0)
+            .sort((a, b) => b.value - a.value);
+            
+          setLeadTemplateStats(chartData);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch comments for stats", err);
       }
       
       if (!isAutoReload && isAuthenticated) {
@@ -165,6 +232,35 @@ const App: React.FC = () => {
       .sort((a, b) => b.id - a.id);
   }, [leads]);
 
+  // Filter customers by location for specific charts
+  const gautengCustomers = useMemo(() => {
+    return apiCustomers.filter(c => getCustomerLocation(c) === 'Gauteng');
+  }, [apiCustomers]);
+
+  const limpopoCustomers = useMemo(() => {
+    return apiCustomers.filter(c => getCustomerLocation(c) === 'Limpopo');
+  }, [apiCustomers]);
+
+  // Calculate location stats (Gauteng vs Limpopo) based on GPS
+  const locationStats = useMemo(() => {
+    const stats: Record<string, number> = { Gauteng: 0, Limpopo: 0, Other: 0 };
+
+    apiCustomers.forEach(c => {
+      const location = getCustomerLocation(c);
+      if (stats[location] !== undefined) {
+        stats[location]++;
+      } else {
+        stats['Other']++;
+      }
+    });
+
+    return [
+      { name: 'Gauteng', value: stats.Gauteng, color: '#8b5cf6' }, // Violet-500
+      { name: 'Limpopo', value: stats.Limpopo, color: '#ec4899' }, // Pink-500
+      { name: 'Other', value: stats.Other, color: '#9ca3af' }      // Gray-400
+    ].filter(i => i.value > 0);
+  }, [apiCustomers]);
+
   // Calculate notification counts (Items that are status "new" AND haven't been viewed yet)
   const newCustomerCount = useMemo(() => {
     return apiCustomers.filter(c => (c.status || '').toLowerCase() === 'new' && !viewedCustomerIds.has(c.id)).length;
@@ -176,30 +272,49 @@ const App: React.FC = () => {
 
   const stats: DashboardStats = useMemo(() => {
     const activeCustomers = apiCustomers.filter(c => (c.status || '').toLowerCase() === 'active').length;
-    const pendingLeads = apiLeads.filter(l => {
-      const s = (l.status || '').toLowerCase();
-      return s === 'new' || s === 'pending';
+    
+    // Calculate new and lost leads separately
+    const newLeads = apiLeads.filter(l => (l.status || '').toLowerCase() === 'new').length;
+    const lostLeads = apiLeads.filter(l => (l.status || '').toLowerCase() === 'lost').length;
+    
+    // Calculate pending installations: Active customers with no assigned devices
+    const pendingInstallations = apiCustomers.filter(c => {
+       const isActive = (c.status || '').toLowerCase() === 'active';
+       const hasDevices = inventory.some(i => i.customer_id === c.id);
+       return isActive && !hasDevices;
     }).length;
-    // Simulated revenue logic
-    const totalRevenue = apiCustomers.reduce((acc, curr) => acc + (curr.balance || 0), 0);
 
     return {
       totalCustomers: apiCustomers.length,
       activeCustomers,
       totalLeads: apiLeads.length,
-      pendingLeads,
+      newLeads,
+      lostLeads,
+      pendingInstallations,
       conversionRate: apiLeads.length > 0 ? ((apiCustomers.length / (apiCustomers.length + apiLeads.length)) * 100).toFixed(1) : '0',
     };
-  }, [apiCustomers, apiLeads]);
+  }, [apiCustomers, apiLeads, inventory]);
 
   const filteredCustomers = useMemo(() => {
     return apiCustomers.filter(c => {
       const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                             c.email.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesStatus = customerStatusFilter === 'all' || (c.status || '').toLowerCase() === customerStatusFilter.toLowerCase();
+      
+      let matchesStatus = false;
+      if (customerStatusFilter === 'all') {
+        matchesStatus = true;
+      } else if (customerStatusFilter === 'pending_installations') {
+        // Special filter for Pending Installations
+        const isActive = (c.status || '').toLowerCase() === 'active';
+        const hasDevices = inventory.some(i => i.customer_id === c.id);
+        matchesStatus = isActive && !hasDevices;
+      } else {
+        matchesStatus = (c.status || '').toLowerCase() === customerStatusFilter.toLowerCase();
+      }
+      
       return matchesSearch && matchesStatus;
     });
-  }, [apiCustomers, searchTerm, customerStatusFilter]);
+  }, [apiCustomers, searchTerm, customerStatusFilter, inventory]);
 
   const filteredLeads = useMemo(() => {
     return apiLeads.filter(l => {
@@ -233,6 +348,40 @@ const App: React.FC = () => {
     });
   };
 
+  const handleLocationClick = (locationName: string) => {
+    const filtered = apiCustomers.filter(c => getCustomerLocation(c) === locationName);
+    setStatusListModal({
+      isOpen: true,
+      title: `Customers in ${locationName}`,
+      customers: filtered
+    });
+  };
+
+  const handleTemplateSliceClick = (data: { name: string, value: number, templateKey: string }) => {
+     const { templateKey, name } = data;
+     
+     // Filter comments based on key
+     const relevantComments = allComments.filter(c => {
+        if (templateKey === 'other') {
+           return !c.template_id;
+        }
+        return String(c.template_id) === templateKey;
+     });
+     
+     // Get unique lead IDs
+     const leadIds = new Set(relevantComments.map(c => Number(c.lead_id)));
+     
+     // Filter leads using apiLeads (which is already filtered by partner_id=4)
+     // This ensures we only show valid leads for this project
+     const relevantLeads = apiLeads.filter(l => leadIds.has(l.id));
+     
+     setLeadListModal({
+        isOpen: true,
+        title: `Leads: ${name}`,
+        leads: relevantLeads
+     });
+  };
+
   // Handle Stat Card Click
   const handleStatCardClick = (type: string) => {
     if (type === 'total_customers') {
@@ -241,9 +390,15 @@ const App: React.FC = () => {
     } else if (type === 'active_customers') {
       setCustomerStatusFilter('active');
       setActiveTab('customers');
-    } else if (type === 'pending_leads') {
-      setLeadStatusFilter('pending');
+    } else if (type === 'new_leads') {
+      setLeadStatusFilter('New');
       setActiveTab('leads');
+    } else if (type === 'lost_leads') {
+      setLeadStatusFilter('Lost');
+      setActiveTab('leads');
+    } else if (type === 'pending_installations') {
+      setCustomerStatusFilter('pending_installations');
+      setActiveTab('customers');
     }
   };
 
@@ -253,6 +408,11 @@ const App: React.FC = () => {
       const newSet = new Set(viewedCustomerIds);
       newSet.add(customer.id);
       setViewedCustomerIds(newSet);
+      
+      // Update in Supabase
+      if (isSupabaseConfigured) {
+        SupabaseService.markCustomerAsRead(customer);
+      }
     }
     setSelectedCustomer(customer);
   };
@@ -262,25 +422,103 @@ const App: React.FC = () => {
       const newSet = new Set(viewedLeadIds);
       newSet.add(lead.id);
       setViewedLeadIds(newSet);
+      
+      // Update in Supabase
+      if (isSupabaseConfigured) {
+        SupabaseService.markLeadAsRead(lead);
+      }
     }
     setSelectedLead(lead);
   };
 
-  const handleLogin = async (username: string, password: string): Promise<void> => {
-    const { data, error } = await supabase
-      .from('Admin')
-      .select('*')
-      .eq('username', username)
-      .eq('Password', password) // Validating against custom 'Admin' table with 'Password' column
-      .single();
+  // Mark All As Viewed Handlers
+  const handleMarkAllCustomersViewed = () => {
+    const newIds = new Set(viewedCustomerIds);
+    const idsToSync: number[] = [];
+    
+    let count = 0;
+    apiCustomers.forEach(c => {
+      if ((c.status || '').toLowerCase() === 'new' && !newIds.has(c.id)) {
+        newIds.add(c.id);
+        idsToSync.push(c.id);
+        count++;
+      }
+    });
+    
+    if (count > 0) {
+      setViewedCustomerIds(newIds);
+      if (isSupabaseConfigured) {
+        SupabaseService.markAllCustomersAsRead(idsToSync, apiCustomers);
+      }
+      toast.success(`Marked ${count} customers as open`);
+    } else {
+      toast('No new customers to mark', { icon: 'ℹ️' });
+    }
+  };
 
-    if (error || !data) {
-      throw new Error('Invalid username or password');
+  const handleMarkAllLeadsViewed = () => {
+    const newIds = new Set(viewedLeadIds);
+    const idsToSync: number[] = [];
+    
+    let count = 0;
+    apiLeads.forEach(l => {
+      if ((l.status || '').toLowerCase() === 'new' && !newIds.has(l.id)) {
+        newIds.add(l.id);
+        idsToSync.push(l.id);
+        count++;
+      }
+    });
+    
+    if (count > 0) {
+      setViewedLeadIds(newIds);
+      if (isSupabaseConfigured) {
+        SupabaseService.markAllLeadsAsRead(idsToSync, apiLeads);
+      }
+      toast.success(`Marked ${count} leads as open`);
+    } else {
+      toast('No new leads to mark', { icon: 'ℹ️' });
+    }
+  };
+
+  const handleLogin = async (username: string, password: string): Promise<void> => {
+    // General Login (View Only)
+    if (username === 'Admin' && password === 'admin') {
+      setCurrentAdmin({
+        id: 0,
+        admin_id: 0,
+        name: 'General',
+        username: 'Admin',
+        role: 'viewer'
+      });
+      setIsAuthenticated(true);
+      toast.success('Welcome back, General!');
+      return;
     }
 
-    setCurrentAdmin(data);
-    setIsAuthenticated(true);
-    toast.success(`Welcome back, ${data.name}!`);
+    // Supabase Login
+    try {
+      if (!isSupabaseConfigured) {
+        throw new Error('Database connection not configured. Please use Admin/admin or set API keys.');
+      }
+
+      console.log("Checking Supabase for Admin...");
+      const adminUser = await SupabaseService.authenticateAdmin(username, password);
+      
+      if (adminUser) {
+        setCurrentAdmin(adminUser);
+        setIsAuthenticated(true);
+        toast.success(`Welcome back, ${adminUser.name}!`);
+        return;
+      }
+    } catch (e: any) {
+      console.error("Supabase Auth check failed", e);
+      // Propagate specific error messages
+      if (e.message.includes("Database connection not configured")) {
+         throw e;
+      }
+    }
+
+    throw new Error('Invalid username or password');
   };
 
   const handleLogout = () => {
@@ -311,6 +549,8 @@ const App: React.FC = () => {
       </>
     );
   }
+
+  const isReadOnly = currentAdmin?.role === 'viewer';
 
   return (
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden">
@@ -365,10 +605,10 @@ const App: React.FC = () => {
               </section>
 
               {/* Charts Grid */}
-              <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Pie Chart 1: Customer Status */}
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Status Distribution</h3>
+                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Status</h3>
                   <p className="text-xs text-gray-400 mb-4">Click slices to view details</p>
                   <StatusPieChart 
                     activeCount={countStatus(apiCustomers, 'active')}
@@ -379,22 +619,48 @@ const App: React.FC = () => {
                     onSliceClick={handlePieSliceClick}
                   />
                 </div>
-
-                {/* Pie Chart 2: Lead Templates */}
+                
+                {/* Pie Chart 2: Customer Location */}
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                  <h3 className="text-md font-semibold text-gray-800 mb-6">Lead Comment Templates</h3>
-                  <p className="text-xs text-gray-400 mb-4">Distribution by template type</p>
-                  <TemplatePieChart data={leadTemplateStats} />
+                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Location</h3>
+                  <p className="text-xs text-gray-400 mb-4">Distribution by Province (GPS)</p>
+                  <LocationPieChart 
+                    data={locationStats} 
+                    onSliceClick={handleLocationClick}
+                  />
                 </div>
 
+                {/* Pie Chart 3: Lead Templates */}
+                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                  <h3 className="text-md font-semibold text-gray-800 mb-6">Lead Comments</h3>
+                  <p className="text-xs text-gray-400 mb-4">Distribution by template (Click to view leads)</p>
+                  <TemplatePieChart 
+                    data={leadTemplateStats} 
+                    onSliceClick={handleTemplateSliceClick} 
+                  />
+                </div>
+              </section>
+              
+              <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Activity Charts */}
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Acquisition Trend</h3>
-                  <ActivityChart data={apiCustomers} type="customers" />
+                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend (By Location)</h3>
+                  <ActivityChart data={apiCustomers} type="customers" groupBy="location" />
                 </div>
-                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                
+                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                   <h3 className="text-md font-semibold text-gray-800 mb-6">Lead Generation Trend</h3>
-                  <ActivityChart data={apiLeads} type="leads" />
+                  <ActivityChart data={apiLeads} type="leads" groupBy="status" />
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend - Gauteng (By Status)</h3>
+                  <ActivityChart data={gautengCustomers} type="customers" groupBy="status" />
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend - Limpopo (By Status)</h3>
+                  <ActivityChart data={limpopoCustomers} type="customers" groupBy="status" />
                 </div>
               </section>
 
@@ -411,8 +677,7 @@ const App: React.FC = () => {
                       columns={[
                         { key: 'name', label: 'Name' },
                         { key: 'email', label: 'Email' },
-                        { key: 'status', label: 'Status' },
-                        { key: 'balance', label: 'Balance' }
+                        { key: 'status', label: 'Status' }
                       ]}
                       type="customer"
                       onRowClick={handleCustomerClick}
@@ -430,7 +695,7 @@ const App: React.FC = () => {
                       data={apiLeads.slice(0, 5)} 
                       columns={[
                         { key: 'name', label: 'Name' },
-                        { key: 'email', label: 'Email' },
+                        { key: 'phone', label: 'Phone' },
                         { key: 'status', label: 'Status' },
                         { key: 'type', label: 'Type' }
                       ]}
@@ -448,7 +713,6 @@ const App: React.FC = () => {
               <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
                 <div>
                   <h2 className="text-lg font-bold text-gray-800">All Customers</h2>
-                  <p className="text-sm text-gray-500 mt-1">Filtering by Partner ID: 4</p>
                 </div>
                 <div className="flex gap-2 items-center">
                    <select 
@@ -461,7 +725,17 @@ const App: React.FC = () => {
                     <option value="new">New</option>
                     <option value="blocked">Blocked</option>
                     <option value="inactive">Inactive</option>
+                    <option value="pending_installations">Pending Installation</option>
                   </select>
+                  <button 
+                    onClick={handleMarkAllCustomersViewed}
+                    disabled={newCustomerCount === 0}
+                    className={`px-3 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-600 flex items-center gap-2 transition-colors ${newCustomerCount === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 hover:text-pink-600'}`}
+                    title="Mark all new customers as open"
+                  >
+                     <CheckCheck className="w-4 h-4" />
+                     Mark All Open
+                  </button>
                   <button className="px-3 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50">Export</button>
                 </div>
               </div>
@@ -484,7 +758,6 @@ const App: React.FC = () => {
                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
                 <div>
                   <h2 className="text-lg font-bold text-gray-800">All Leads</h2>
-                  <p className="text-sm text-gray-500 mt-1">Filtering by Partner ID: 4</p>
                 </div>
                 <div className="flex gap-2 items-center">
                    <select 
@@ -493,11 +766,20 @@ const App: React.FC = () => {
                     className="px-3 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-pink-500"
                   >
                     <option value="all">All Statuses</option>
-                    <option value="new">New</option>
-                    <option value="pending">Pending</option>
-                    <option value="converted">Converted</option>
-                    <option value="lost">Lost</option>
+                    <option value="New">New</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Won">Won</option>
+                    <option value="Lost">Lost</option>
                   </select>
+                  <button 
+                    onClick={handleMarkAllLeadsViewed}
+                    disabled={newLeadCount === 0}
+                    className={`px-3 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-600 flex items-center gap-2 transition-colors ${newLeadCount === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 hover:text-pink-600'}`}
+                    title="Mark all new leads as open"
+                  >
+                     <CheckCheck className="w-4 h-4" />
+                     Mark All Open
+                  </button>
                 </div>
               </div>
               <DataTable 
@@ -505,7 +787,9 @@ const App: React.FC = () => {
                 columns={[
                   { key: 'id', label: 'ID' },
                   { key: 'name', label: 'Name' },
-                  { key: 'phone', label: 'Phone' }
+                  { key: 'phone', label: 'Phone' },
+                  { key: 'status', label: 'Status' },
+                  { key: 'type', label: 'Type' }
                 ]}
                 type="lead"
                 onRowClick={handleLeadClick}
@@ -522,6 +806,7 @@ const App: React.FC = () => {
         customer={selectedCustomer}
         devices={selectedCustomerDevices}
         currentUser={currentAdmin}
+        readOnly={isReadOnly}
       />
 
       <LeadModal 
@@ -529,6 +814,7 @@ const App: React.FC = () => {
         onClose={() => setSelectedLead(null)}
         lead={selectedLead}
         currentUser={currentAdmin}
+        readOnly={isReadOnly}
       />
 
       <CustomerListModal
@@ -537,6 +823,14 @@ const App: React.FC = () => {
         title={statusListModal.title}
         customers={statusListModal.customers}
         onCustomerClick={handleCustomerClick}
+      />
+      
+      <LeadListModal
+        isOpen={leadListModal.isOpen}
+        onClose={() => setLeadListModal({ ...leadListModal, isOpen: false })}
+        title={leadListModal.title}
+        leads={leadListModal.leads}
+        onLeadClick={handleLeadClick}
       />
 
       <AdminProfileModal
@@ -549,6 +843,7 @@ const App: React.FC = () => {
           username: currentAdmin.username
         } : { admin_id: 0, name: 'Guest', username: 'guest' }}
         onAdminUpdate={handleAdminUpdate}
+        readOnly={isReadOnly}
       />
 
       <Toaster position="bottom-right" />

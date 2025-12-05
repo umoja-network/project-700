@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { User, Lock, ArrowRight, Loader2, Eye, EyeOff, Wifi } from 'lucide-react';
+import { User, Lock, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react';
 
 interface LoginPageProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -44,10 +44,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         
         {/* Logo Area */}
         <div className="relative z-10 flex items-center gap-3">
-          <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center p-2">
-             <Wifi className="h-8 w-8 text-pink-600" />
-          </div>
-          <span className="text-2xl font-bold tracking-tight">Umoja Portal</span>
+          <img 
+             src="https://thabisot33.github.io/logo/Umoja%20Logo%20Web_320x86_png.png" 
+             alt="Umoja Portal" 
+             className="h-16 w-auto object-contain" 
+          />
         </div>
 
         {/* Hero Text */}

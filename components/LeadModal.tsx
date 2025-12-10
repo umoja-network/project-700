@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Lead, AdminUser, LeadComment, Template } from '../types';
 import { GoogleSheetsService } from '../services/googleSheetsService';
@@ -208,7 +207,16 @@ export const LeadModal: React.FC<LeadModalProps> = ({ isOpen, onClose, lead, cur
               <Phone className="w-5 h-5 text-gray-400 mt-0.5" />
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Phone</p>
-                <p className="text-gray-900">{lead.phone}</p>
+                {lead.phone ? (
+                  <a 
+                    href={`tel:${lead.phone.replace(/\s+/g, '')}`}
+                    className="text-gray-900 hover:text-pink-600 hover:underline transition-colors font-medium"
+                  >
+                    {lead.phone}
+                  </a>
+                ) : (
+                  <p className="text-gray-900">N/A</p>
+                )}
               </div>
             </div>
 

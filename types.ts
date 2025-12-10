@@ -1,4 +1,5 @@
 
+
 export interface Lead {
   id: number;
   name: string;
@@ -58,6 +59,15 @@ export interface InventoryItem {
   customer_id?: number;
   status?: string;
   price?: number;
+}
+
+export interface Delivery {
+  Time: string;
+  'Customer ID': string | number;
+  Name: string;
+  'Router Barcode': string;
+  'SIM Barcode': string;
+  Agent: string;
 }
 
 export interface DashboardStats {

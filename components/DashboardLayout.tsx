@@ -1,11 +1,10 @@
-
 import React, { useState } from 'react';
-import { LayoutDashboard, Users, UserPlus, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Users, UserPlus, LogOut, ChevronLeft, ChevronRight, Truck } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
-  activeTab: 'dashboard' | 'customers' | 'leads';
-  setActiveTab: (tab: 'dashboard' | 'customers' | 'leads') => void;
+  activeTab: 'dashboard' | 'customers' | 'leads' | 'deliveries';
+  setActiveTab: (tab: 'dashboard' | 'customers' | 'leads' | 'deliveries') => void;
   newCustomerCount: number;
   newLeadCount: number;
   onLogout: () => void;
@@ -29,6 +28,7 @@ export const DashboardLayout: React.FC<LayoutProps> = ({
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, badge: 0 },
     { id: 'customers', label: 'Customers', icon: Users, badge: newCustomerCount },
     { id: 'leads', label: 'Leads', icon: UserPlus, badge: newLeadCount },
+    { id: 'deliveries', label: 'Deliveries', icon: Truck, badge: 0 },
   ] as const;
 
   return (

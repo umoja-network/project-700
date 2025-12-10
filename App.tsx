@@ -3,7 +3,7 @@ import { SplynxService } from './services/splynxService';
 import { GoogleSheetsService } from './services/googleSheetsService';
 import { SupabaseService } from './services/supabaseService';
 import { isSupabaseConfigured } from './services/supabaseClient';
-import { Customer, Lead, DashboardStats, InventoryItem, AdminUser, LeadComment } from './types';
+import { Customer, Lead, DashboardStats, InventoryItem, AdminUser, LeadComment, Delivery } from './types';
 import { DashboardLayout } from './components/DashboardLayout';
 import { StatsCards } from './components/StatsCards';
 import { DataTable } from './components/DataTable';
@@ -16,8 +16,10 @@ import { LeadModal } from './components/LeadModal';
 import { CustomerListModal } from './components/CustomerListModal';
 import { LeadListModal } from './components/LeadListModal';
 import { AdminProfileModal } from './components/AdminProfileModal';
+import { DeliveryModal } from './components/DeliveryModal';
 import { LoginPage } from './components/LoginPage';
 import { Toaster, toast } from 'react-hot-toast';
+import { GOOGLE_SHEETS_CONFIG } from './constants';
 import { 
   Search, 
   RefreshCw,
@@ -49,10 +51,11 @@ const getCustomerLocation = (c: Customer): string => {
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'leads'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'leads' | 'deliveries'>('dashboard');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isMockData, setIsMockData] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -69,6 +72,7 @@ const App: React.FC = () => {
   // Modal States
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
   const [isAdminProfileOpen, setIsAdminProfileOpen] = useState(false);
   
   // Pie Chart Modal State
@@ -136,6 +140,14 @@ const App: React.FC = () => {
           .filter((l: any) => l.partner_id === 4)
           .map((l: any) => l.id)
       );
+
+      // Fetch Deliveries
+      try {
+        const deliveriesData = await GoogleSheetsService.fetchSheet<Delivery>('Deliverd_Devices', GOOGLE_SHEETS_CONFIG.DELIVERY_SPREADSHEET_ID);
+        setDeliveries(deliveriesData);
+      } catch (err) {
+        console.warn('Failed to fetch delivery data', err);
+      }
 
       // Fetch comments for Lead Template Pie Chart (Google Sheets)
       try {
@@ -325,6 +337,17 @@ const App: React.FC = () => {
     });
   }, [apiLeads, searchTerm, leadStatusFilter]);
 
+  const filteredDeliveries = useMemo(() => {
+    return deliveries.filter(d => {
+       const searchLower = searchTerm.toLowerCase();
+       return (
+         (d.Name && String(d.Name).toLowerCase().includes(searchLower)) ||
+         (d['Customer ID'] && String(d['Customer ID']).toLowerCase().includes(searchLower)) ||
+         (d['Router Barcode'] && String(d['Router Barcode']).toLowerCase().includes(searchLower))
+       );
+    });
+  }, [deliveries, searchTerm]);
+
   // Get devices for selected customer
   const selectedCustomerDevices = useMemo(() => {
     if (!selectedCustomer) return [];
@@ -429,6 +452,10 @@ const App: React.FC = () => {
       }
     }
     setSelectedLead(lead);
+  };
+
+  const handleDeliveryClick = (delivery: Delivery) => {
+    setSelectedDelivery(delivery);
   };
 
   // Mark All As Viewed Handlers
@@ -797,6 +824,29 @@ const App: React.FC = () => {
               />
             </div>
           )}
+
+          {activeTab === 'deliveries' && (
+             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+               <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800">Deliveries History</h2>
+                </div>
+                <div className="flex gap-2 items-center">
+                   <button className="px-3 py-1.5 bg-white border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50">Export</button>
+                </div>
+              </div>
+              <DataTable 
+                data={filteredDeliveries} 
+                columns={[
+                  { key: 'Time', label: 'Date' },
+                  { key: 'Name', label: 'Name' },
+                  { key: 'Agent', label: 'Agent' }
+                ]}
+                type="customer" // reusing styling
+                onRowClick={handleDeliveryClick}
+              />
+             </div>
+          )}
         </main>
       </DashboardLayout>
 
@@ -815,6 +865,12 @@ const App: React.FC = () => {
         lead={selectedLead}
         currentUser={currentAdmin}
         readOnly={isReadOnly}
+      />
+
+      <DeliveryModal
+        isOpen={!!selectedDelivery}
+        onClose={() => setSelectedDelivery(null)}
+        delivery={selectedDelivery}
       />
 
       <CustomerListModal

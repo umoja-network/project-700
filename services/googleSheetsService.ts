@@ -1,4 +1,5 @@
 
+
 import { GOOGLE_SHEETS_CONFIG } from '../constants';
 import * as jose from 'jose';
 
@@ -42,11 +43,14 @@ export const GoogleSheetsService = {
 
   /**
    * Fetches data from a specific sheet and parses it into an array of objects.
+   * @param sheetName The name of the sheet (tab) to fetch
+   * @param customSpreadsheetId Optional spreadsheet ID to override the default one
    */
-  async fetchSheet<T = any>(sheetName: string): Promise<T[]> {
+  async fetchSheet<T = any>(sheetName: string, customSpreadsheetId?: string): Promise<T[]> {
     try {
       const accessToken = await this.getAccessToken();
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEETS_CONFIG.SPREADSHEET_ID}/values/${sheetName}`;
+      const spreadsheetId = customSpreadsheetId || GOOGLE_SHEETS_CONFIG.SPREADSHEET_ID;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetName}`;
       
       const response = await fetch(url, {
         headers: {

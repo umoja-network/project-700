@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Customer, InventoryItem, CustomerNote, AdminUser } from '../types';
 import { SplynxService } from '../services/splynxService';
@@ -222,7 +221,16 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({ isOpen, onClose, c
                 <Phone className="w-5 h-5 text-gray-400 mt-0.5" />
                 <div>
                   <p className="text-xs text-gray-500">Phone</p>
-                  <p className="text-gray-900 font-medium">{customer.phone || 'N/A'}</p>
+                  {customer.phone ? (
+                    <a 
+                      href={`tel:${customer.phone.replace(/\s+/g, '')}`} 
+                      className="text-gray-900 font-medium hover:text-pink-600 hover:underline transition-colors"
+                    >
+                      {customer.phone}
+                    </a>
+                  ) : (
+                    <p className="text-gray-900 font-medium">N/A</p>
+                  )}
                 </div>
               </div>
               <div className="flex items-start gap-3">

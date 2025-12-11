@@ -1,4 +1,3 @@
-
 import React, { useMemo } from 'react';
 import { 
   BarChart, 
@@ -14,10 +13,12 @@ import {
 interface ActivityChartProps {
   data: any[];
   type: 'customers' | 'leads';
+  groupBy?: 'location' | 'status';
+  onBarClick?: (data: { month: string; category: string }) => void;
 }
 
 // Helper to determine location based on GPS
-const getLocation = (item: any): 'Gauteng' | 'Limpopo' | 'Other' => {
+const getLocation = (item: any): string => {
   if (item.gps) {
     const parts = item.gps.split(',').map((p: string) => parseFloat(p.trim()));
     if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
@@ -37,10 +38,29 @@ const getLocation = (item: any): 'Gauteng' | 'Limpopo' | 'Other' => {
   return 'Other';
 };
 
-export const ActivityChart: React.FC<ActivityChartProps> = ({ data, type }) => {
-  // Aggregate data by month and location
-  const chartData = useMemo(() => {
-    const stats = new Map<string, { Gauteng: number; Limpopo: number; Other: number }>();
+const STATUS_COLORS: Record<string, string> = {
+  // Shared / Customer Statuses
+  'Active': '#10b981',    // Emerald-500
+  'New': '#ec4899',       // Pink-500 (Consistent with Badges)
+  'Blocked': '#ef4444',   // Red-500
+  'Inactive': '#9ca3af',  // Gray-400
+  
+  // Lead Statuses
+  'In Progress': '#3b82f6', // Blue-500
+  'Won': '#10b981',       // Emerald-500
+  'Lost': '#9ca3af'       // Gray-400
+};
+
+const LOCATION_COLORS: Record<string, string> = {
+  'Gauteng': '#8b5cf6', // Violet-500
+  'Limpopo': '#ec4899', // Pink-500
+  'Other': '#9ca3af'    // Gray-400
+};
+
+export const ActivityChart: React.FC<ActivityChartProps> = ({ data, type, groupBy = 'location', onBarClick }) => {
+  // Aggregate data by month and grouping key
+  const { chartData, keys } = useMemo(() => {
+    const stats = new Map<string, Record<string, number>>();
 
     data.forEach(item => {
       // Prioritize date_add, fallback to created_at
@@ -54,15 +74,38 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({ data, type }) => {
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       
       if (!stats.has(key)) {
-        stats.set(key, { Gauteng: 0, Limpopo: 0, Other: 0 });
+        stats.set(key, {});
+      }
+      
+      const entry = stats.get(key)!;
+      let groupKey = 'Other';
+
+      if (groupBy === 'location') {
+        groupKey = getLocation(item);
+      } else {
+        // Status Grouping
+        const rawStatus = (item.status || 'New').toLowerCase();
+        
+        if (type === 'customers') {
+          if (rawStatus === 'active') groupKey = 'Active';
+          else if (rawStatus === 'new') groupKey = 'New';
+          else if (rawStatus === 'blocked') groupKey = 'Blocked';
+          else if (['inactive', 'disable', 'disabled'].includes(rawStatus)) groupKey = 'Inactive';
+          else groupKey = 'Other';
+        } else {
+          // Leads
+          if (rawStatus === 'new') groupKey = 'New';
+          else if (['in progress', 'qualification', 'activation', 'pending'].includes(rawStatus)) groupKey = 'In Progress';
+          else if (rawStatus === 'won') groupKey = 'Won';
+          else if (rawStatus === 'lost') groupKey = 'Lost';
+          else groupKey = 'Other';
+        }
       }
 
-      const location = getLocation(item);
-      const entry = stats.get(key)!;
-      entry[location]++;
+      entry[groupKey] = (entry[groupKey] || 0) + 1;
     });
 
-    if (stats.size === 0) return [];
+    if (stats.size === 0) return { chartData: [], keys: [] };
 
     // Convert to array and sort chronologically
     const sortedKeys = Array.from(stats.keys()).sort();
@@ -70,9 +113,8 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({ data, type }) => {
     // Take the last 6 months
     const recentKeys = sortedKeys.slice(-6);
 
-    return recentKeys.map(key => {
+    const processedData = recentKeys.map(key => {
       const [year, month] = key.split('-');
-      // Month is 0-indexed in JS Date
       const date = new Date(parseInt(year), parseInt(month) - 1);
       const monthName = date.toLocaleString('default', { month: 'short' });
       
@@ -82,7 +124,19 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({ data, type }) => {
         ...stats.get(key)
       };
     });
-  }, [data]);
+
+    // Determine consistent keys for rendering bars based on config
+    let finalKeys: string[] = [];
+    if (groupBy === 'location') {
+       finalKeys = ['Gauteng', 'Limpopo', 'Other'];
+    } else if (type === 'customers') {
+       finalKeys = ['Active', 'New', 'Blocked', 'Inactive'];
+    } else {
+       finalKeys = ['New', 'In Progress', 'Won', 'Lost'];
+    }
+
+    return { chartData: processedData, keys: finalKeys };
+  }, [data, type, groupBy]);
 
   if (chartData.length === 0) {
     return (
@@ -91,6 +145,11 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({ data, type }) => {
       </div>
     );
   }
+
+  const getBarColor = (key: string) => {
+    if (groupBy === 'location') return LOCATION_COLORS[key] || '#9ca3af';
+    return STATUS_COLORS[key] || '#9ca3af';
+  };
 
   return (
     <div className="h-64 w-full">
@@ -121,10 +180,21 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({ data, type }) => {
             }}
           />
           <Legend iconType="circle" height={36} />
-          {/* Grouped Bars (removed stackId) */}
-          <Bar dataKey="Gauteng" fill="#8b5cf6" name="Gauteng" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="Limpopo" fill="#ec4899" name="Limpopo" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="Other" fill="#9ca3af" name="Other" radius={[4, 4, 0, 0]} />
+          {keys.map((key) => (
+             <Bar 
+               key={key} 
+               dataKey={key} 
+               fill={getBarColor(key)} 
+               name={key} 
+               radius={[4, 4, 0, 0]} 
+               onClick={(data) => {
+                 if (onBarClick && data && data.payload) {
+                   onBarClick({ month: data.payload.fullName, category: key });
+                 }
+               }}
+               cursor={onBarClick ? 'pointer' : 'default'}
+             />
+          ))}
         </BarChart>
       </ResponsiveContainer>
     </div>

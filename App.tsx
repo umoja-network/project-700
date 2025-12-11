@@ -48,6 +48,30 @@ const getCustomerLocation = (c: Customer): string => {
   return 'Other';
 };
 
+// Helper to match ActivityChart grouping logic
+const getItemCategory = (item: any, type: 'customers' | 'leads', groupBy: 'location' | 'status'): string => {
+  if (groupBy === 'location') {
+    return getCustomerLocation(item as Customer);
+  }
+  
+  const rawStatus = (item.status || 'New').toLowerCase();
+  
+  if (type === 'customers') {
+      if (rawStatus === 'active') return 'Active';
+      if (rawStatus === 'new') return 'New';
+      if (rawStatus === 'blocked') return 'Blocked';
+      if (['inactive', 'disable', 'disabled'].includes(rawStatus)) return 'Inactive';
+      return 'Other';
+  } else {
+      // Leads
+      if (rawStatus === 'new') return 'New';
+      if (['in progress', 'qualification', 'activation', 'pending'].includes(rawStatus)) return 'In Progress';
+      if (rawStatus === 'won') return 'Won';
+      if (rawStatus === 'lost') return 'Lost';
+      return 'Other';
+  }
+};
+
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(null);
@@ -405,6 +429,45 @@ const App: React.FC = () => {
      });
   };
 
+  // Factory for Bar Chart Click Handler
+  const createBarClickHandler = (sourceData: any[], type: 'customers' | 'leads', groupBy: 'location' | 'status', titlePrefix: string) => {
+    return (data: { month: string; category: string }) => {
+        const { month, category } = data;
+        const [monthName, yearStr] = month.split(' ');
+        const monthIndex = new Date(`${monthName} 1, 2000`).getMonth();
+        const year = parseInt(yearStr);
+        
+        const filtered = sourceData.filter(item => {
+            // Prioritize date_add, fallback to created_at
+            const dateStr = item.date_add || item.created_at;
+            if (!dateStr) return false;
+            
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return false;
+
+            // Check month/year match
+            if (d.getMonth() !== monthIndex || d.getFullYear() !== year) return false;
+            
+            // Check category match
+            return getItemCategory(item, type, groupBy) === category;
+        });
+        
+        if (type === 'customers') {
+            setStatusListModal({
+                isOpen: true,
+                title: `${titlePrefix}: ${category} (${month})`,
+                customers: filtered as Customer[]
+            });
+        } else {
+             setLeadListModal({
+                isOpen: true,
+                title: `${titlePrefix}: ${category} (${month})`,
+                leads: filtered as Lead[]
+            });
+        }
+    }
+  };
+
   // Handle Stat Card Click
   const handleStatCardClick = (type: string) => {
     if (type === 'total_customers') {
@@ -672,22 +735,42 @@ const App: React.FC = () => {
                 {/* Activity Charts */}
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                   <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend (By Location)</h3>
-                  <ActivityChart data={apiCustomers} type="customers" groupBy="location" />
+                  <ActivityChart 
+                    data={apiCustomers} 
+                    type="customers" 
+                    groupBy="location" 
+                    onBarClick={createBarClickHandler(apiCustomers, 'customers', 'location', 'All Customers')}
+                  />
                 </div>
                 
                  <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                   <h3 className="text-md font-semibold text-gray-800 mb-6">Lead Generation Trend</h3>
-                  <ActivityChart data={apiLeads} type="leads" groupBy="status" />
+                  <ActivityChart 
+                    data={apiLeads} 
+                    type="leads" 
+                    groupBy="status" 
+                    onBarClick={createBarClickHandler(apiLeads, 'leads', 'status', 'Leads')}
+                  />
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                   <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend - Gauteng (By Status)</h3>
-                  <ActivityChart data={gautengCustomers} type="customers" groupBy="status" />
+                  <ActivityChart 
+                    data={gautengCustomers} 
+                    type="customers" 
+                    groupBy="status" 
+                    onBarClick={createBarClickHandler(gautengCustomers, 'customers', 'status', 'Gauteng Customers')}
+                  />
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                   <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend - Limpopo (By Status)</h3>
-                  <ActivityChart data={limpopoCustomers} type="customers" groupBy="status" />
+                  <ActivityChart 
+                    data={limpopoCustomers} 
+                    type="customers" 
+                    groupBy="status" 
+                    onBarClick={createBarClickHandler(limpopoCustomers, 'customers', 'status', 'Limpopo Customers')}
+                  />
                 </div>
               </section>
 

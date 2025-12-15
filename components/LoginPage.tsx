@@ -1,15 +1,15 @@
-
 import React, { useState } from 'react';
 import { User, Lock, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react';
 
 interface LoginPageProps {
-  onLogin: (username: string, password: string) => Promise<void>;
+  onLogin: (username: string, password: string, rememberMe: boolean) => Promise<void>;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,7 +20,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
     if (username && password) {
       try {
-        await onLogin(username, password);
+        await onLogin(username, password, rememberMe);
       } catch (err: any) {
         setError(err.message || 'Login failed. Please check your credentials.');
         setIsLoading(false);
@@ -139,9 +139,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   id="remember-me"
                   name="remember-me"
                   type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
                   className="h-4 w-4 text-pink-600 focus:ring-pink-500 border-gray-300 rounded"
                 />
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
+                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900 cursor-pointer">
                   Remember me
                 </label>
               </div>

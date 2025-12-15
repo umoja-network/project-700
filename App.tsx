@@ -48,27 +48,23 @@ const getCustomerLocation = (c: Customer): string => {
   return 'Other';
 };
 
-// Helper to match ActivityChart grouping logic
-const getItemCategory = (item: any, type: 'customers' | 'leads', groupBy: 'location' | 'status'): string => {
-  if (groupBy === 'location') {
-    return getCustomerLocation(item as Customer);
-  }
-  
+// Helper to determine status for filtering
+const getStatus = (item: any, type: 'customers' | 'leads'): string => {
   const rawStatus = (item.status || 'New').toLowerCase();
   
   if (type === 'customers') {
-      if (rawStatus === 'active') return 'Active';
-      if (rawStatus === 'new') return 'New';
-      if (rawStatus === 'blocked') return 'Blocked';
-      if (['inactive', 'disable', 'disabled'].includes(rawStatus)) return 'Inactive';
-      return 'Other';
+    if (rawStatus === 'active') return 'Active';
+    if (rawStatus === 'new') return 'New';
+    if (rawStatus === 'blocked') return 'Blocked';
+    if (['inactive', 'disable', 'disabled'].includes(rawStatus)) return 'Inactive';
+    return 'Inactive';
   } else {
-      // Leads
-      if (rawStatus === 'new') return 'New';
-      if (['in progress', 'qualification', 'activation', 'pending'].includes(rawStatus)) return 'In Progress';
-      if (rawStatus === 'won') return 'Won';
-      if (rawStatus === 'lost') return 'Lost';
-      return 'Other';
+    // Leads
+    if (rawStatus === 'new') return 'New';
+    if (['in progress', 'qualification', 'activation', 'pending'].includes(rawStatus)) return 'In Progress';
+    if (rawStatus === 'won') return 'Won';
+    if (rawStatus === 'lost') return 'Lost';
+    return 'In Progress';
   }
 };
 
@@ -115,6 +111,22 @@ const App: React.FC = () => {
   // Template Chart Stats
   const [leadTemplateStats, setLeadTemplateStats] = useState<{name: string, value: number, templateKey: string}[]>([]);
   const [allComments, setAllComments] = useState<LeadComment[]>([]);
+
+  // Check for stored session on mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem('umoja_user') || sessionStorage.getItem('umoja_user');
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser);
+        setCurrentAdmin(user);
+        setIsAuthenticated(true);
+      } catch (e) {
+        console.error('Failed to parse stored session');
+        localStorage.removeItem('umoja_user');
+        sessionStorage.removeItem('umoja_user');
+      }
+    }
+  }, []);
 
   const fetchData = async (isAutoReload = false) => {
     if (!isAutoReload) setLoading(true);
@@ -268,15 +280,6 @@ const App: React.FC = () => {
       .sort((a, b) => b.id - a.id);
   }, [leads]);
 
-  // Filter customers by location for specific charts
-  const gautengCustomers = useMemo(() => {
-    return apiCustomers.filter(c => getCustomerLocation(c) === 'Gauteng');
-  }, [apiCustomers]);
-
-  const limpopoCustomers = useMemo(() => {
-    return apiCustomers.filter(c => getCustomerLocation(c) === 'Limpopo');
-  }, [apiCustomers]);
-
   // Calculate location stats (Gauteng vs Limpopo) based on GPS
   const locationStats = useMemo(() => {
     const stats: Record<string, number> = { Gauteng: 0, Limpopo: 0, Other: 0 };
@@ -429,10 +432,10 @@ const App: React.FC = () => {
      });
   };
 
-  // Factory for Bar Chart Click Handler
-  const createBarClickHandler = (sourceData: any[], type: 'customers' | 'leads', groupBy: 'location' | 'status', titlePrefix: string) => {
-    return (data: { month: string; category: string }) => {
-        const { month, category } = data;
+  // Factory for Bar Chart Click Handler (Enhanced for multidimensional filtering)
+  const createBarClickHandler = (sourceData: any[], type: 'customers' | 'leads', titlePrefix: string) => {
+    return (data: { month: string; location: string; status?: string }) => {
+        const { month, location, status } = data;
         const [monthName, yearStr] = month.split(' ');
         const monthIndex = new Date(`${monthName} 1, 2000`).getMonth();
         const year = parseInt(yearStr);
@@ -448,20 +451,27 @@ const App: React.FC = () => {
             // Check month/year match
             if (d.getMonth() !== monthIndex || d.getFullYear() !== year) return false;
             
-            // Check category match
-            return getItemCategory(item, type, groupBy) === category;
+            // Check location match
+            if (getCustomerLocation(item) !== location) return false;
+
+            // Check status match only if specified and not "All"
+            if (status && status !== 'All' && getStatus(item, type) !== status) return false;
+            
+            return true;
         });
+
+        const displayStatus = (!status || status === 'All') ? 'All' : status;
         
         if (type === 'customers') {
             setStatusListModal({
                 isOpen: true,
-                title: `${titlePrefix}: ${category} (${month})`,
+                title: `${titlePrefix}: ${displayStatus} in ${location} (${month})`,
                 customers: filtered as Customer[]
             });
         } else {
              setLeadListModal({
                 isOpen: true,
-                title: `${titlePrefix}: ${category} (${month})`,
+                title: `${titlePrefix}: ${displayStatus} in ${location} (${month})`,
                 leads: filtered as Lead[]
             });
         }
@@ -570,42 +580,57 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (username: string, password: string): Promise<void> => {
+  const handleLogin = async (username: string, password: string, rememberMe: boolean): Promise<void> => {
+    let userToAuth: AdminUser | null = null;
+
     // General Login (View Only)
     if (username === 'Admin' && password === 'admin') {
-      setCurrentAdmin({
+      userToAuth = {
         id: 0,
         admin_id: 0,
         name: 'General',
         username: 'Admin',
         role: 'viewer'
-      });
-      setIsAuthenticated(true);
-      toast.success('Welcome back, General!');
-      return;
+      };
+    } else {
+        // Supabase Login
+        try {
+            if (!isSupabaseConfigured) {
+                throw new Error('Database connection not configured. Please use Admin/admin or set API keys.');
+            }
+            console.log("Checking Supabase for Admin...");
+            const adminUser = await SupabaseService.authenticateAdmin(username, password);
+            if (adminUser) {
+                userToAuth = adminUser;
+            }
+        } catch (e: any) {
+            console.error("Supabase Auth check failed", e);
+             if (e.message.includes("Database connection not configured")) {
+                 throw e;
+             }
+        }
     }
 
-    // Supabase Login
-    try {
-      if (!isSupabaseConfigured) {
-        throw new Error('Database connection not configured. Please use Admin/admin or set API keys.');
-      }
+    if (userToAuth) {
+        // Remove sensitive data before storing
+        const safeUser = { ...userToAuth };
+        delete safeUser.Password; 
+        delete safeUser.password;
 
-      console.log("Checking Supabase for Admin...");
-      const adminUser = await SupabaseService.authenticateAdmin(username, password);
-      
-      if (adminUser) {
-        setCurrentAdmin(adminUser);
+        setCurrentAdmin(safeUser);
         setIsAuthenticated(true);
-        toast.success(`Welcome back, ${adminUser.name}!`);
+        toast.success(`Welcome back, ${safeUser.name}!`);
+
+        // Store Session
+        if (rememberMe) {
+            localStorage.setItem('umoja_user', JSON.stringify(safeUser));
+            // Ensure session storage is clear so we don't have conflicting states if logic changes
+            sessionStorage.removeItem('umoja_user');
+        } else {
+            sessionStorage.setItem('umoja_user', JSON.stringify(safeUser));
+            localStorage.removeItem('umoja_user');
+        }
         return;
-      }
-    } catch (e: any) {
-      console.error("Supabase Auth check failed", e);
-      // Propagate specific error messages
-      if (e.message.includes("Database connection not configured")) {
-         throw e;
-      }
     }
 
     throw new Error('Invalid username or password');
@@ -615,15 +640,29 @@ const App: React.FC = () => {
     setIsAuthenticated(false);
     setCurrentAdmin(null);
     setActiveTab('dashboard');
+    
+    // Clear Session
+    localStorage.removeItem('umoja_user');
+    sessionStorage.removeItem('umoja_user');
+
     toast.success('Logged out successfully');
   };
 
   const handleAdminUpdate = (updatedData: { username: string }) => {
     if (currentAdmin) {
-      setCurrentAdmin({
+      const updated = {
         ...currentAdmin,
         username: updatedData.username
-      });
+      };
+      setCurrentAdmin(updated);
+      
+      // Update storage if it exists to keep session valid with new name
+      if (localStorage.getItem('umoja_user')) {
+          localStorage.setItem('umoja_user', JSON.stringify(updated));
+      }
+      if (sessionStorage.getItem('umoja_user')) {
+          sessionStorage.setItem('umoja_user', JSON.stringify(updated));
+      }
     }
   };
 
@@ -734,12 +773,11 @@ const App: React.FC = () => {
               <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Activity Charts */}
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend (By Location)</h3>
+                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend</h3>
                   <ActivityChart 
                     data={apiCustomers} 
                     type="customers" 
-                    groupBy="location" 
-                    onBarClick={createBarClickHandler(apiCustomers, 'customers', 'location', 'All Customers')}
+                    onBarClick={createBarClickHandler(apiCustomers, 'customers', 'Customers')}
                   />
                 </div>
                 
@@ -748,28 +786,7 @@ const App: React.FC = () => {
                   <ActivityChart 
                     data={apiLeads} 
                     type="leads" 
-                    groupBy="status" 
-                    onBarClick={createBarClickHandler(apiLeads, 'leads', 'status', 'Leads')}
-                  />
-                </div>
-
-                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend - Gauteng (By Status)</h3>
-                  <ActivityChart 
-                    data={gautengCustomers} 
-                    type="customers" 
-                    groupBy="status" 
-                    onBarClick={createBarClickHandler(gautengCustomers, 'customers', 'status', 'Gauteng Customers')}
-                  />
-                </div>
-
-                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                  <h3 className="text-md font-semibold text-gray-800 mb-6">Customer Trend - Limpopo (By Status)</h3>
-                  <ActivityChart 
-                    data={limpopoCustomers} 
-                    type="customers" 
-                    groupBy="status" 
-                    onBarClick={createBarClickHandler(limpopoCustomers, 'customers', 'status', 'Limpopo Customers')}
+                    onBarClick={createBarClickHandler(apiLeads, 'leads', 'Leads')}
                   />
                 </div>
               </section>

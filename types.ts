@@ -1,5 +1,4 @@
 
-
 export interface Lead {
   id: number;
   name: string;
@@ -77,6 +76,7 @@ export interface DashboardStats {
   newLeads: number;
   lostLeads: number;
   pendingInstallations: number;
+  collectionsCount: number;
   conversionRate: string;
 }
 

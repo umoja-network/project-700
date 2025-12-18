@@ -323,6 +323,13 @@ const App: React.FC = () => {
        return isActive && !hasDevices;
     }).length;
 
+    // Calculate Collections: Disabled status with no assigned devices
+    const collectionsCount = apiCustomers.filter(c => {
+      const isStatusDisabled = ['inactive', 'disable', 'disabled'].includes((c.status || '').toLowerCase());
+      const hasDevices = inventory.some(i => i.customer_id === c.id);
+      return isStatusDisabled && !hasDevices;
+    }).length;
+
     return {
       totalCustomers: apiCustomers.length,
       activeCustomers,
@@ -330,6 +337,7 @@ const App: React.FC = () => {
       newLeads,
       lostLeads,
       pendingInstallations,
+      collectionsCount,
       conversionRate: apiLeads.length > 0 ? ((apiCustomers.length / (apiCustomers.length + apiLeads.length)) * 100).toFixed(1) : '0',
     };
   }, [apiCustomers, apiLeads, inventory]);
@@ -347,6 +355,11 @@ const App: React.FC = () => {
         const isActive = (c.status || '').toLowerCase() === 'active';
         const hasDevices = inventory.some(i => i.customer_id === c.id);
         matchesStatus = isActive && !hasDevices;
+      } else if (customerStatusFilter === 'collections') {
+        // Special filter for Collections (Disabled w/o devices)
+        const isStatusDisabled = ['inactive', 'disable', 'disabled'].includes((c.status || '').toLowerCase());
+        const hasDevices = inventory.some(i => i.customer_id === c.id);
+        matchesStatus = isStatusDisabled && !hasDevices;
       } else {
         matchesStatus = (c.status || '').toLowerCase() === customerStatusFilter.toLowerCase();
       }
@@ -494,6 +507,9 @@ const App: React.FC = () => {
       setActiveTab('leads');
     } else if (type === 'pending_installations') {
       setCustomerStatusFilter('pending_installations');
+      setActiveTab('customers');
+    } else if (type === 'collections') {
+      setCustomerStatusFilter('collections');
       setActiveTab('customers');
     }
   };
@@ -853,6 +869,7 @@ const App: React.FC = () => {
                     <option value="blocked">Blocked</option>
                     <option value="inactive">Inactive</option>
                     <option value="pending_installations">Pending Installation</option>
+                    <option value="collections">Collections</option>
                   </select>
                   <button 
                     onClick={handleMarkAllCustomersViewed}

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { DashboardStats } from '../types';
-import { Users, UserPlus, TrendingUp, Activity, Wrench, UserX } from 'lucide-react';
+import { Users, UserPlus, TrendingUp, Activity, Wrench, UserX, Archive } from 'lucide-react';
 
 interface StatsCardsProps {
   stats: DashboardStats;
@@ -37,6 +37,16 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, onCardClick }) =>
       icon: Wrench,
       color: 'bg-indigo-500',
       trend: 'Active customers w/o devices',
+      trendUp: false,
+      clickable: true
+    },
+    {
+      id: 'collections',
+      title: 'Collections',
+      value: stats.collectionsCount,
+      icon: Archive,
+      color: 'bg-slate-600',
+      trend: 'Disabled w/o devices',
       trendUp: false,
       clickable: true
     },
